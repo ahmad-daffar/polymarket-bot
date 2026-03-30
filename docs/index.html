@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Polymarket Bot — Starting Up</title>
+<title>Polymarket Research Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -11,58 +12,604 @@
     background: #0a0e17;
     color: #e2e8f0;
     min-height: 100vh;
+  }
+  .header {
+    background: linear-gradient(135deg, #1a1f35 0%, #0d1321 100%);
+    border-bottom: 1px solid #1e293b;
+    padding: 24px 32px;
     display: flex;
+    justify-content: space-between;
     align-items: center;
-    justify-content: center;
   }
-  .card {
-    text-align: center;
-    padding: 60px 80px;
-    background: #111827;
-    border: 1px solid #1e293b;
-    border-radius: 16px;
-    max-width: 540px;
-  }
-  h1 {
-    font-size: 26px;
+  .header h1 {
+    font-size: 22px;
     font-weight: 700;
     background: linear-gradient(135deg, #60a5fa, #a78bfa);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    margin-bottom: 16px;
   }
-  p { color: #64748b; font-size: 15px; line-height: 1.7; }
+  .header .meta { color: #64748b; font-size: 13px; }
+  .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+
+  /* KPI Cards */
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .kpi {
+    background: #111827;
+    border: 1px solid #1e293b;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+  }
+  .kpi .label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .kpi .value { font-size: 28px; font-weight: 700; }
+  .kpi .sub { font-size: 12px; color: #64748b; margin-top: 4px; }
+  .green { color: #34d399; }
+  .red { color: #f87171; }
+  .blue { color: #60a5fa; }
+  .purple { color: #a78bfa; }
+  .yellow { color: #fbbf24; }
+
+  /* Sections */
+  .section {
+    background: #111827;
+    border: 1px solid #1e293b;
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+  .section h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: #94a3b8;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section h2 .icon { font-size: 20px; }
+
+  /* Charts grid */
+  .charts-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 24px;
+  }
+  @media (max-width: 900px) { .charts-grid { grid-template-columns: 1fr; } }
+  .chart-box {
+    background: #111827;
+    border: 1px solid #1e293b;
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .chart-box h3 { font-size: 14px; color: #94a3b8; margin-bottom: 12px; }
+  .chart-container { position: relative; height: 280px; }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th {
+    text-align: left;
+    padding: 10px 12px;
+    background: #0f172a;
+    color: #64748b;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 11px;
+    border-bottom: 1px solid #1e293b;
+  }
+  td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #1e293b;
+  }
+  tr:hover { background: #0f172a; }
   .badge {
     display: inline-block;
-    margin-top: 24px;
-    padding: 8px 20px;
-    background: #0f172a;
-    border: 1px solid #1e3a5f;
-    border-radius: 999px;
-    color: #60a5fa;
-    font-size: 13px;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 11px;
     font-weight: 600;
   }
-  .dot {
-    display: inline-block;
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: #34d399;
-    margin-right: 8px;
-    animation: pulse 1.5s ease-in-out infinite;
+  .badge-pass { background: #064e3b; color: #34d399; }
+  .badge-fail { background: #450a0a; color: #f87171; }
+  .badge-buy { background: #1e3a5f; color: #60a5fa; }
+  .badge-sell { background: #5b21b6; color: #c4b5fd; }
+
+  /* Market cards */
+  .market-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .market-card {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 8px;
+    padding: 14px;
   }
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
+  .market-card .title { font-size: 13px; font-weight: 600; margin-bottom: 6px; line-height: 1.4; }
+  .market-card .stats { display: flex; gap: 16px; font-size: 12px; color: #64748b; }
+  .market-card .stats span { display: flex; align-items: center; gap: 4px; }
+
+  /* Scrollable table */
+  .table-wrap { max-height: 500px; overflow-y: auto; }
+  .table-wrap::-webkit-scrollbar { width: 6px; }
+  .table-wrap::-webkit-scrollbar-track { background: #111827; }
+  .table-wrap::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+  .tab-bar { display: flex; gap: 4px; margin-bottom: 16px; }
+  .tab {
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    color: #94a3b8;
+    transition: all 0.2s;
   }
+  .tab.active { background: #1e293b; color: #e2e8f0; border-color: #334155; }
+  .tab:hover { background: #1e293b; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
 </style>
 </head>
 <body>
-<div class="card">
-  <h1>Polymarket Copy-Trading Bot</h1>
-  <p>Forward-only paper trading simulation. Starting from zero — no backtest, no fake history.<br><br>
-  The first dashboard will appear after the bot's next scheduled run (every 2 hours).</p>
-  <div class="badge"><span class="dot"></span>Waiting for first forward cycle&hellip;</div>
+
+<div class="header">
+  <div>
+    <h1>Polymarket Research Dashboard</h1>
+    <div class="meta">Generated 2026-03-30 16:49 UTC &middot; Database: polymarket_bot.db</div>
+  </div>
+  <div class="meta">
+    10 wallets &middot; 5000 trades &middot; 200 markets &middot; 0 sim trades
+  </div>
 </div>
+
+<div class="container">
+
+  <!-- Forward-only mode banner -->
+  <div style="background:#0f1a2e;border:1px solid #1e3a5f;border-radius:8px;padding:12px 20px;margin-bottom:20px;display:flex;align-items:center;gap:12px;">
+    <span style="font-size:18px">🏁</span>
+    <div>
+      <span style="color:#60a5fa;font-weight:600;font-size:13px">FORWARD-ONLY MODE</span>
+      <span style="color:#475569;font-size:12px;margin-left:12px">No backtesting — only real forward trades counted</span>
+      <span style="color:#475569;font-size:12px;margin-left:12px">Started: 2026-03-30 16:48 UTC</span>
+    </div>
+  </div>
+
+  <!-- KPI Row -->
+  <div class="kpi-row">
+    <div class="kpi">
+      <div class="label">Starting Capital</div>
+      <div class="value blue">$10,000</div>
+      <div class="sub">configurable via env</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Current Capital</div>
+      <div class="value green">$10,000.00</div>
+      <div class="sub">+0.0% return</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Days Running</div>
+      <div class="value purple">0</div>
+      <div class="sub">forward trades: 0</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Win Rate</div>
+      <div class="value yellow">0.0%</div>
+      <div class="sub">0W / 0L of 0 resolved</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Max Drawdown</div>
+      <div class="value yellow">0.0%</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Wallets Tracked</div>
+      <div class="value purple">10</div>
+      <div class="sub">of 10 scored</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Total P&amp;L</div>
+      <div class="value green">$+0.00</div>
+      <div class="sub">fees paid: $0.00</div>
+    </div>
+  </div>
+
+  <!-- Charts Row -->
+  <div class="charts-grid">
+    <div class="chart-box">
+      <h3>Equity Curve</h3>
+      <div class="chart-container"><canvas id="equityChart"></canvas></div>
+    </div>
+    <div class="chart-box">
+      <h3>Trade P&amp;L Distribution</h3>
+      <div class="chart-container"><canvas id="pnlChart"></canvas></div>
+    </div>
+    <div class="chart-box">
+      <h3>Entry Price Distribution</h3>
+      <div class="chart-container"><canvas id="priceChart"></canvas></div>
+    </div>
+    <div class="chart-box">
+      <h3>Wallet Scores</h3>
+      <div class="chart-container"><canvas id="scoreChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Wallet Table -->
+  <div class="section">
+    <h2><span class="icon">👛</span> Scored Wallets</h2>
+    <div class="tab-bar">
+      <div class="tab active" onclick="switchTab(event, 'passing')">Passing (10)</div>
+      <div class="tab" onclick="switchTab(event, 'failing')">Filtered Out (0)</div>
+    </div>
+    <div id="tab-passing" class="tab-content active">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Rank</th><th>Username</th><th>Score</th><th>PnL</th>
+            <th>Trades</th><th>Win Rate</th><th>Avg Entry</th><th>Max DD</th><th>Consistency</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><strong>knedloveprovelo</strong></td>
+              <td><strong>0.514</strong></td>
+              <td class="green">$149,263</td>
+              <td>3500</td>
+              <td>43.3%</td>
+              <td>0.387</td>
+              <td>84.2%</td>
+              <td>0.767</td>
+            </tr><tr>
+              <td>2</td>
+              <td><strong>Suertudo1</strong></td>
+              <td><strong>0.404</strong></td>
+              <td class="green">$138,345</td>
+              <td>3500</td>
+              <td>48.4%</td>
+              <td>0.434</td>
+              <td>145.7%</td>
+              <td>0.850</td>
+            </tr><tr>
+              <td>3</td>
+              <td><strong>anoin123</strong></td>
+              <td><strong>0.350</strong></td>
+              <td class="green">$103,908</td>
+              <td>3500</td>
+              <td>46.0%</td>
+              <td>0.428</td>
+              <td>136.4%</td>
+              <td>0.780</td>
+            </tr><tr>
+              <td>4</td>
+              <td><strong>bcda</strong></td>
+              <td><strong>0.000</strong></td>
+              <td class="green">$292,178</td>
+              <td>3500</td>
+              <td>48.4%</td>
+              <td>0.458</td>
+              <td>441820.8%</td>
+              <td>0.837</td>
+            </tr><tr>
+              <td>5</td>
+              <td><strong>Tiger200</strong></td>
+              <td><strong>0.000</strong></td>
+              <td class="green">$156,129</td>
+              <td>3500</td>
+              <td>65.1%</td>
+              <td>0.631</td>
+              <td>26192.5%</td>
+              <td>0.844</td>
+            </tr><tr>
+              <td>6</td>
+              <td><strong>texaskid</strong></td>
+              <td><strong>0.000</strong></td>
+              <td class="green">$150,346</td>
+              <td>2230</td>
+              <td>57.4%</td>
+              <td>0.543</td>
+              <td>949.3%</td>
+              <td>0.875</td>
+            </tr><tr>
+              <td>7</td>
+              <td><strong>Talvez10</strong></td>
+              <td><strong>0.000</strong></td>
+              <td class="green">$147,048</td>
+              <td>3500</td>
+              <td>48.2%</td>
+              <td>0.464</td>
+              <td>1073.9%</td>
+              <td>0.868</td>
+            </tr><tr>
+              <td>8</td>
+              <td><strong>CarlosMC</strong></td>
+              <td><strong>0.000</strong></td>
+              <td class="green">$78,950</td>
+              <td>3500</td>
+              <td>56.1%</td>
+              <td>0.521</td>
+              <td>2477.9%</td>
+              <td>0.794</td>
+            </tr><tr>
+              <td>9</td>
+              <td><strong>Jdhdhduu</strong></td>
+              <td><strong>0.000</strong></td>
+              <td class="green">$68,967</td>
+              <td>3500</td>
+              <td>49.0%</td>
+              <td>0.461</td>
+              <td>2965.4%</td>
+              <td>0.842</td>
+            </tr><tr>
+              <td>10</td>
+              <td><strong>Mentallyillgambld</strong></td>
+              <td><strong>0.000</strong></td>
+              <td class="green">$68,486</td>
+              <td>1754</td>
+              <td>58.6%</td>
+              <td>0.588</td>
+              <td>1524.9%</td>
+              <td>0.802</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div id="tab-failing" class="tab-content">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Username</th><th>Score</th><th>PnL</th><th>Trades</th><th>Filter Reasons</th>
+          </tr></thead>
+          <tbody>
+            
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Simulated Trades -->
+  <div class="section">
+    <h2><span class="icon">📊</span> Simulated Trades (last 100)</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Time</th><th>Market</th><th>Side</th><th>Entry</th>
+          <th>Size</th><th>P&amp;L</th><th>Bankroll</th><th>Result</th>
+        </tr></thead>
+        <tbody>
+          
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Top Markets -->
+  <div class="section">
+    <h2><span class="icon">🎯</span> Top Markets by Volume</h2>
+    <div class="market-grid">
+      <div class="market-card">
+        <div class="title">Will Chelsea Clinton win the 2028 Democratic presi</div>
+        <div class="stats">
+          <span>💰 $44,638,823</span>
+          <span>📈 0.00</span>
+        </div>
+      </div><div class="market-card">
+        <div class="title">Will Oprah Winfrey win the 2028 Democratic preside</div>
+        <div class="stats">
+          <span>💰 $43,316,290</span>
+          <span>📈 0.00</span>
+        </div>
+      </div><div class="market-card">
+        <div class="title">Will LeBron James win the 2028 US Presidential Ele</div>
+        <div class="stats">
+          <span>💰 $42,747,020</span>
+          <span>📈 0.00</span>
+        </div>
+      </div><div class="market-card">
+        <div class="title">Will Andrew Yang win the 2028 Democratic president</div>
+        <div class="stats">
+          <span>💰 $42,079,689</span>
+          <span>📈 0.00</span>
+        </div>
+      </div><div class="market-card">
+        <div class="title">Will Bernie Sanders win the 2028 Democratic presid</div>
+        <div class="stats">
+          <span>💰 $38,900,596</span>
+          <span>📈 0.00</span>
+        </div>
+      </div><div class="market-card">
+        <div class="title">Will LeBron James win the 2028 Democratic presiden</div>
+        <div class="stats">
+          <span>💰 $38,640,479</span>
+          <span>📈 0.00</span>
+        </div>
+      </div><div class="market-card">
+        <div class="title">Will Tim Walz win the 2028 US Presidential Electio</div>
+        <div class="stats">
+          <span>💰 $38,505,083</span>
+          <span>📈 0.00</span>
+        </div>
+      </div><div class="market-card">
+        <div class="title">Will Hillary Clinton win the 2028 Democratic presi</div>
+        <div class="stats">
+          <span>💰 $37,493,534</span>
+          <span>📈 0.00</span>
+        </div>
+      </div><div class="market-card">
+        <div class="title">Will George Clooney win the 2028 Democratic presid</div>
+        <div class="stats">
+          <span>💰 $37,318,758</span>
+          <span>📈 0.00</span>
+        </div>
+      </div><div class="market-card">
+        <div class="title">Will Tim Walz win the 2028 Democratic presidential</div>
+        <div class="stats">
+          <span>💰 $36,557,165</span>
+          <span>📈 0.00</span>
+        </div>
+      </div><div class="market-card">
+        <div class="title">Will MrBeast win the 2028 Democratic presidential </div>
+        <div class="stats">
+          <span>💰 $35,290,369</span>
+          <span>📈 0.00</span>
+        </div>
+      </div><div class="market-card">
+        <div class="title">Will Phil Murphy win the 2028 Democratic president</div>
+        <div class="stats">
+          <span>💰 $33,485,360</span>
+          <span>📈 0.00</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // Tab switching
+  function switchTab(e, id) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    e.target.classList.add('active');
+    document.getElementById('tab-' + id).classList.add('active');
+  }
+
+  // Chart defaults
+  Chart.defaults.color = '#94a3b8';
+  Chart.defaults.borderColor = '#1e293b';
+  const gridColor = '#1e293b';
+
+  // 1. Equity Curve
+  new Chart(document.getElementById('equityChart'), {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        label: 'Bankroll ($)',
+        data: [],
+        borderColor: '#60a5fa',
+        backgroundColor: 'rgba(96,165,250,0.1)',
+        fill: true,
+        tension: 0.3,
+        pointRadius: 0,
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: { grid: { color: gridColor }, ticks: { callback: v => '$'+v } }
+      }
+    }
+  });
+
+  // 2. PnL Distribution
+  (() => {
+    const pnlVals = [];
+    if (pnlVals.length === 0) return;
+    const min = Math.floor(Math.min(...pnlVals));
+    const max = Math.ceil(Math.max(...pnlVals));
+    const binSize = Math.max(1, Math.ceil((max - min) / 20));
+    const bins = {};
+    for (let v of pnlVals) {
+      const b = Math.floor(v / binSize) * binSize;
+      bins[b] = (bins[b] || 0) + 1;
+    }
+    const sortedKeys = Object.keys(bins).map(Number).sort((a,b) => a-b);
+    new Chart(document.getElementById('pnlChart'), {
+      type: 'bar',
+      data: {
+        labels: sortedKeys.map(k => '$' + k),
+        datasets: [{
+          label: 'Trades',
+          data: sortedKeys.map(k => bins[k]),
+          backgroundColor: sortedKeys.map(k => k >= 0 ? '#34d399' : '#f87171'),
+          borderRadius: 3,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { display: false } },
+          y: { grid: { color: gridColor } }
+        }
+      }
+    });
+  })();
+
+  // 3. Entry Price Distribution
+  (() => {
+    const prices = [0.22, 0.12, 0.53, 0.77, 0.77, 0.22, 0.22, 0.22, 0.22, 0.41, 0.41, 0.41, 0.41, 0.71, 0.71, 0.71, 0.71, 0.71, 0.71, 0.77, 0.77, 0.73, 0.73, 0.67, 0.51, 0.63, 0.63, 0.51, 0.63, 0.56, 0.56, 0.61, 0.58, 0.58, 0.58, 0.58, 0.73, 0.02, 0.73, 0.59, 0.59, 0.77, 0.59, 0.59, 0.77, 0.77, 0.35, 0.5, 0.61, 0.61, 0.38, 0.35, 0.77, 0.27, 0.02, 0.35, 0.51, 0.58, 0.77, 0.35, 0.77, 0.68, 0.68, 0.68, 0.35, 0.77, 0.74, 0.74, 0.53, 0.74, 0.74, 0.74, 0.74, 0.74, 0.74, 0.74, 0.53, 0.74, 0.74, 0.74, 0.74, 0.74, 0.74, 0.53, 0.74, 0.74, 0.53, 0.74, 0.74, 0.53, 0.73, 0.71, 0.71, 0.71, 0.71, 0.71, 0.71, 0.71, 0.04, 0.71, 0.71, 0.71, 0.11, 0.11, 0.11, 0.04, 0.46, 0.73, 0.85, 0.03, 0.44, 0.03, 0.03, 0.03, 0.73, 0.13, 0.13, 0.13, 0.13, 0.13, 0.44, 0.44, 0.73, 0.73, 0.73, 0.73, 0.44, 0.76, 0.76, 0.76, 0.39, 0.39, 0.07, 0.39, 0.83, 0.83, 0.44, 0.35, 0.25, 0.44, 0.52, 0.52, 0.52, 0.52, 0.52, 0.52, 0.52, 0.52, 0.07, 0.46, 0.46, 0.46, 0.44, 0.46, 0.46, 0.35, 0.46, 0.77, 0.14, 0.14, 0.14, 0.35, 0.14, 0.73, 0.73, 0.53, 0.35, 0.66, 0.77, 0.66, 0.73, 0.66, 0.66, 0.66, 0.6, 0.71, 0.73, 0.71, 0.71, 0.71, 0.77, 0.35, 0.42, 0.44, 0.17, 0.17, 0.73, 0.44, 0.52, 0.52, 0.52, 0.52, 0.52, 0.52, 0.52, 0.52, 0.52, 0.52, 0.52, 0.44, 0.44, 0.52, 0.44, 0.35, 0.35, 0.35, 0.35, 0.35, 0.35, 0.16, 0.35, 0.27, 0.27, 0.44, 0.44, 0.8, 0.8, 0.8, 0.8, 0.44, 0.4, 0.8, 0.77, 0.38, 0.38, 0.38, 0.38, 0.4, 0.59, 0.59, 0.59, 0.44, 0.35, 0.23, 0.35, 0.44, 0.32, 0.44, 0.32, 0.44, 0.27, 0.44, 0.27, 0.27, 0.27, 0.27, 0.27, 0.27, 0.27, 0.27, 0.27, 0.22, 0.24, 0.24, 0.24, 0.24, 0.24, 0.24, 0.18, 0.18, 0.18, 0.44, 0.24, 0.24, 0.24, 0.24, 0.44, 0.35, 0.44, 0.44, 0.44, 0.12, 0.44, 0.29, 0.29, 0.35, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.42, 0.42, 0.42, 0.77, 0.28, 0.28, 0.54, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.46, 0.46, 0.46, 0.18, 0.18, 0.18, 0.46, 0.51, 0.44, 0.18, 0.6, 0.6, 0.6, 0.44, 0.18, 0.18, 0.18, 0.44, 0.44, 0.35, 0.42, 0.44, 0.42, 0.42, 0.42, 0.42, 0.35, 0.35, 0.44, 0.44, 0.44, 0.44, 0.44, 0.77, 0.44, 0.44, 0.77, 0.02, 0.44, 0.35, 0.44, 0.44, 0.44, 0.52, 0.47, 0.79, 0.44, 0.44, 0.43, 0.42, 0.44, 0.44, 0.44, 0.53, 0.53, 0.35, 0.44, 0.44, 0.42, 0.42, 0.44, 0.44, 0.44, 0.49, 0.49, 0.53, 0.44, 0.44, 0.51, 0.62, 0.44, 0.38, 0.53, 0.38, 0.38, 0.38, 0.44, 0.63, 0.44, 0.47, 0.35, 0.31, 0.47, 0.31, 0.44, 0.44, 0.31, 0.63, 0.31, 0.44, 0.44, 0.44, 0.44, 0.63, 0.63, 0.44, 0.63, 0.63, 0.63, 0.44, 0.77, 0.44, 0.44, 0.44, 0.48, 0.33, 0.44, 0.44, 0.73, 0.35, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.35, 0.54, 0.08, 0.08, 0.44, 0.44, 0.53, 0.35, 0.44, 0.53, 0.53, 0.53, 0.36, 0.36, 0.36, 0.44, 0.35, 0.52, 0.45, 0.44, 0.44, 0.44, 0.7, 0.44, 0.72, 0.44, 0.44, 0.49, 0.49, 0.44, 0.49, 0.49, 0.44, 0.49, 0.44, 0.36, 0.44, 0.37, 0.36, 0.36, 0.5, 0.44, 0.44, 0.3, 0.44, 0.52, 0.44, 0.3, 0.52, 0.52, 0.3, 0.44, 0.66, 0.66, 0.66, 0.66, 0.66, 0.44, 0.66, 0.44, 0.44, 0.44, 0.66, 0.66, 0.66, 0.44, 0.66, 0.66, 0.44, 0.07, 0.59, 0.44, 0.59, 0.44, 0.44, 0.44, 0.44, 0.35, 0.44, 0.31, 0.35, 0.31, 0.44, 0.63, 0.35, 0.77, 0.08, 0.35, 0.63, 0.08, 0.08, 0.08, 0.44, 0.44, 0.58, 0.58, 0.58, 0.58, 0.58, 0.58, 0.58, 0.58, 0.44, 0.38, 0.44, 0.44, 0.44, 0.44, 0.5, 0.44, 0.47, 0.47, 0.44, 0.5, 0.35, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.73, 0.53, 0.44, 0.35, 0.73, 0.45, 0.73, 0.35, 0.44, 0.44, 0.44, 0.44, 0.44, 0.73, 0.73, 0.44, 0.73, 0.44, 0.44, 0.44, 0.44, 0.35, 0.44, 0.73, 0.35, 0.44, 0.44, 0.53, 0.38, 0.5, 0.38, 0.5, 0.44, 0.38, 0.44, 0.5, 0.62, 0.5, 0.44, 0.44, 0.58, 0.39, 0.58, 0.58, 0.26, 0.58, 0.5, 0.5, 0.5, 0.5, 0.58, 0.5, 0.5, 0.5, 0.5, 0.58, 0.44, 0.5, 0.5, 0.77, 0.5, 0.44, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.35, 0.5, 0.5, 0.58, 0.07, 0.44, 0.55, 0.6, 0.55, 0.44, 0.44, 0.44, 0.44, 0.35, 0.5, 0.5, 0.44, 0.44, 0.44, 0.44, 0.44, 0.53, 0.53, 0.44, 0.35, 0.54, 0.35, 0.06, 0.54, 0.04, 0.44, 0.43, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.07, 0.44, 0.77, 0.44, 0.44, 0.77, 0.33, 0.49, 0.49, 0.49, 0.49, 0.49, 0.49, 0.43, 0.33, 0.46, 0.46, 0.52, 0.52, 0.3, 0.44, 0.3, 0.56, 0.3, 0.3, 0.56, 0.56, 0.35, 0.57, 0.28, 0.44, 0.57, 0.4, 0.57, 0.49, 0.44, 0.35, 0.77, 0.62, 0.49, 0.44, 0.96, 0.27, 0.44, 0.44, 0.3, 0.77, 0.44, 0.44, 0.34, 0.33, 0.33, 0.3, 0.69, 0.69, 0.31, 0.69, 0.31, 0.44, 0.69, 0.31, 0.32, 0.65, 0.65, 0.32, 0.35, 0.44, 0.62, 0.3, 0.62, 0.93, 0.44, 0.35, 0.37, 0.33, 0.37, 0.44, 0.3, 0.44, 0.3, 0.44, 0.49, 0.44, 0.35, 0.44, 0.44, 0.44, 0.49, 0.3, 0.3, 0.35, 0.06, 0.35, 0.34, 0.06, 0.63, 0.44, 0.44, 0.63, 0.35, 0.44, 0.44, 0.32, 0.3, 0.44, 0.44, 0.44, 0.73, 0.73, 0.3, 0.49, 0.64, 0.3, 0.44, 0.71, 0.71, 0.27, 0.27, 0.71, 0.27, 0.71, 0.3, 0.46, 0.46, 0.44, 0.04, 0.46, 0.3, 0.44, 0.46, 0.44, 0.44, 0.3, 0.35, 0.3, 0.44, 0.3, 0.44, 0.09, 0.3, 0.63, 0.44, 0.63, 0.09, 0.09, 0.57, 0.44, 0.44, 0.56, 0.3, 0.56, 0.3, 0.3, 0.44, 0.3, 0.44, 0.44, 0.63, 0.44, 0.63, 0.63, 0.63, 0.63, 0.63, 0.63, 0.63, 0.63, 0.63, 0.63, 0.44, 0.63, 0.63, 0.63, 0.3, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.86, 0.44, 0.49, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.3, 0.44, 0.3, 0.07, 0.61, 0.3, 0.24, 0.44, 0.44, 0.54, 0.44, 0.44, 0.89, 0.44, 0.56, 0.3, 0.35, 0.13, 0.44, 0.39, 0.44, 0.35, 0.39, 0.39, 0.39, 0.39, 0.39, 0.44, 0.44, 0.44, 0.12, 0.44, 0.12, 0.12, 0.3, 0.44, 0.4, 0.44, 0.77, 0.3, 0.44, 0.44, 0.44, 0.44, 0.3, 0.44, 0.45, 0.44, 0.46, 0.44, 0.44, 0.3, 0.44, 0.38, 0.49, 0.44, 0.3, 0.36, 0.59, 0.44, 0.44, 0.35, 0.3, 0.47, 0.3, 0.35, 0.44, 0.44, 0.3, 0.5, 0.5, 0.5, 0.44, 0.41, 0.41, 0.44, 0.3, 0.5, 0.44, 0.44, 0.44, 0.49, 0.3, 0.44, 0.77, 0.3, 0.16, 0.44, 0.56, 0.08, 0.3, 0.3, 0.89, 0.89, 0.3, 0.09, 0.3, 0.3, 0.32, 0.44, 0.89, 0.3, 0.35, 0.3, 0.77, 0.44, 0.44, 0.86, 0.44, 0.44, 0.44, 0.44, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.77, 0.38, 0.3, 0.38, 0.3, 0.35, 0.3, 0.3, 0.11, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.35, 0.3, 0.3, 0.49, 0.3, 0.3, 0.3, 0.3, 0.3, 0.8, 0.8, 0.8, 0.3, 0.3, 0.3, 0.77, 0.91, 0.77, 0.3, 0.3, 0.77, 0.3, 0.3, 0.3, 0.75, 0.3, 0.22, 0.42, 0.3, 0.42, 0.35, 0.35, 0.35, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.3, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.3, 0.42, 0.08, 0.3, 0.3, 0.42, 0.49, 0.42, 0.38, 0.3, 0.3, 0.3, 0.49, 0.3, 0.3, 0.42, 0.77, 0.49, 0.3, 0.3, 0.3, 0.38, 0.35, 0.42, 0.3, 0.35, 0.3, 0.3, 0.3, 0.3, 0.77, 0.3, 0.38, 0.38, 0.3, 0.3, 0.3, 0.3, 0.3, 0.35, 0.49, 0.35, 0.3, 0.38, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.35, 0.3, 0.07, 0.77, 0.77, 0.3, 0.62, 0.62, 0.3, 0.77, 0.3, 0.32, 0.35, 0.35, 0.3, 0.38, 0.3, 0.3, 0.35, 0.49, 0.38, 0.35, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.56, 0.3, 0.59, 0.59, 0.59, 0.59, 0.35, 0.57, 0.49, 0.59, 0.59, 0.38, 0.77, 0.56, 0.56, 0.35, 0.3, 0.3, 0.3, 0.3, 0.52, 0.52, 0.52, 0.3, 0.35, 0.3, 0.42, 0.35, 0.3, 0.3, 0.42, 0.05, 0.05, 0.05, 0.05, 0.05, 0.42, 0.05, 0.3, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.3, 0.3, 0.3, 0.3, 0.39, 0.39, 0.39, 0.39, 0.3, 0.39, 0.3, 0.39, 0.39, 0.39, 0.39, 0.39, 0.39, 0.39, 0.39, 0.39, 0.39, 0.39, 0.39, 0.39, 0.39, 0.39, 0.39, 0.39, 0.39, 0.3, 0.39, 0.3, 0.52, 0.52, 0.52, 0.52, 0.77, 0.3, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.3, 0.45, 0.45, 0.06, 0.46, 0.77, 0.06, 0.06, 0.77, 0.06, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.01, 0.01, 0.01, 0.01, 0.1, 0.1, 0.1, 0.1, 0.1, 0.03, 0.03, 0.03, 0.03, 0.03, 0.44, 0.44, 0.44, 0.3, 0.44, 0.3, 0.77, 0.77, 0.1, 0.1, 0.3, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.3, 0.3, 0.3, 0.35, 0.17, 0.17, 0.3, 0.35, 0.3, 0.42, 0.39, 0.49, 0.18, 0.18, 0.22, 0.76, 0.22, 0.22, 0.22, 0.76, 0.18, 0.22, 0.22, 0.76, 0.22, 0.22, 0.22, 0.22, 0.76, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.76, 0.22, 0.3, 0.22, 0.3, 0.3, 0.22, 0.22, 0.22, 0.18, 0.18, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.38, 0.42, 0.42, 0.49, 0.18, 0.18, 0.3, 0.3, 0.77, 0.3, 0.3, 0.3, 0.38, 0.38, 0.38, 0.38, 0.38, 0.38, 0.38, 0.38, 0.38, 0.3, 0.42, 0.3, 0.3, 0.3, 0.3, 0.3, 0.47, 0.38, 0.47, 0.47, 0.47, 0.47, 0.5, 0.3, 0.48, 0.48, 0.49, 0.49, 0.49, 0.49, 0.49, 0.48, 0.49, 0.49, 0.49, 0.49, 0.49, 0.49, 0.49, 0.49, 0.48, 0.48, 0.47, 0.47, 0.3, 0.4, 0.4, 0.59, 0.3, 0.3, 0.3, 0.18, 0.38, 0.3, 0.3, 0.38, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.36, 0.3, 0.3, 0.67, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.49, 0.49, 0.42, 0.3, 0.18, 0.3, 0.3, 0.3, 0.3, 0.18, 0.18, 0.77, 0.3, 0.3, 0.27, 0.27, 0.77, 0.38, 0.3, 0.49, 0.42, 0.18, 0.3, 0.18, 0.38, 0.3, 0.35, 0.38, 0.49, 0.35, 0.3, 0.3, 0.3, 0.23, 0.23, 0.3, 0.23, 0.38, 0.35, 0.3, 0.3, 0.38, 0.65, 0.68, 0.3, 0.18, 0.33, 0.3, 0.3, 0.97, 0.35, 0.77, 0.18, 0.3, 0.3, 0.35, 0.02, 0.02, 0.3, 0.02, 0.69, 0.3, 0.03, 0.03, 0.65, 0.06, 0.65, 0.03, 0.03, 0.65, 0.65, 0.65, 0.65, 0.65, 0.28, 0.28, 0.28, 0.26, 0.3, 0.71, 0.26, 0.26, 0.71, 0.71, 0.3, 0.18, 0.35, 0.35, 0.3, 0.3, 0.77, 0.3, 0.64, 0.3, 0.35, 0.3, 0.3, 0.88, 0.3, 0.3, 0.14, 0.3, 0.81, 0.75, 0.3, 0.18, 0.75, 0.49, 0.49, 0.01, 0.18, 0.35, 0.18, 0.78, 0.78, 0.78, 0.32, 0.3, 0.3, 0.81, 0.3, 0.85, 0.3, 0.3, 0.3, 0.74, 0.3, 0.74, 0.74, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.3, 0.07, 0.3, 0.72, 0.72, 0.38, 0.87, 0.87, 1.0, 0.3, 0.07, 0.35, 0.91, 0.3, 0.3, 0.77, 0.3, 0.21, 0.21, 0.15, 0.3, 0.71, 0.71, 0.35, 0.72, 0.72, 0.35, 0.49, 0.3, 0.42, 0.3, 0.76, 0.3, 0.76, 0.76, 0.76, 0.76, 0.38, 0.38, 0.5, 0.38, 0.3, 0.3, 0.48, 0.3, 0.3, 0.8, 0.48, 0.3, 0.38, 0.33, 0.61, 0.33, 0.33, 0.33, 0.33, 0.35, 0.3, 0.3, 0.3, 0.7, 0.52, 0.19, 0.19, 0.3, 0.19, 0.3, 0.3, 0.3, 0.3, 0.38, 0.64, 0.64, 0.64, 0.64, 0.64, 0.3, 0.11, 0.3, 0.3, 0.76, 0.3, 0.35, 0.34, 0.34, 0.3, 0.3, 0.35, 0.3, 0.3, 0.3, 0.55, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.3, 0.09, 0.3, 0.3, 0.57, 0.09, 0.3, 0.1, 0.1, 0.56, 0.7, 0.09, 0.09, 0.38, 0.38, 0.18, 0.36, 0.77, 0.3, 0.3, 0.3, 0.49, 0.07, 0.07, 0.3, 0.35, 0.06, 0.06, 0.06, 0.58, 0.06, 0.25, 0.6, 0.6, 0.3, 0.3, 0.01, 0.3, 0.71, 0.6, 0.27, 0.3, 0.6, 0.6, 0.6, 0.6, 0.66, 0.6, 0.6, 0.72, 0.72, 0.6, 0.42, 0.76, 0.09, 0.76, 0.74, 0.01, 0.32, 0.32, 0.09, 0.64, 0.7, 0.09, 0.09, 0.42, 0.64, 0.69, 0.43, 0.69, 0.43, 0.69, 0.69, 0.64, 0.58, 0.43, 0.43, 0.43, 0.43, 0.64, 0.68, 0.43, 0.43, 0.43, 0.43, 0.43, 0.45, 0.64, 0.68, 0.3, 0.59, 0.59, 0.63, 0.69, 0.35, 0.15, 0.15, 0.6, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.69, 0.3, 0.59, 0.59, 0.59, 0.6, 0.59, 0.59, 0.3, 0.7, 0.59, 0.6, 0.6, 0.38, 0.6, 0.57, 0.72, 0.38, 0.72, 0.38, 0.77, 0.71, 0.57, 0.71, 0.59, 0.59, 0.59, 0.59, 0.59, 0.59, 0.57, 0.57, 0.11, 0.12, 0.12, 0.12, 0.12, 0.12, 0.3, 0.14, 0.69, 0.14, 0.14, 1.0, 0.14, 0.3, 0.69, 0.27, 0.27, 0.3, 0.27, 0.4, 0.21, 0.21, 0.21, 0.21, 0.21, 0.21, 0.21, 0.21, 0.21, 0.21, 0.21, 0.21, 0.21, 0.3, 0.21, 0.56, 0.21, 0.3, 0.57, 0.35, 0.57, 0.69, 0.71, 0.7, 0.27, 0.29, 0.29, 0.3, 0.56, 0.56, 0.56, 0.56, 0.56, 0.3, 0.5, 0.5, 0.49, 0.53, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.41, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.41, 0.41, 0.41, 0.41, 0.43, 0.43, 0.3, 0.35, 0.56, 0.56, 0.56, 0.56, 0.56, 0.28, 0.21, 0.21, 0.18, 0.65, 0.81, 0.86, 0.89, 0.87, 0.87, 0.38, 0.87, 0.35, 0.88, 0.3, 0.88, 0.88, 0.83, 0.3, 0.82, 0.87, 0.3, 0.86, 0.87, 0.86, 0.79, 0.84, 0.79, 0.67, 0.27, 0.67, 0.3, 0.81, 0.3, 0.58, 0.35, 0.3, 0.35, 0.41, 0.81, 0.75, 0.3, 0.81, 0.25, 0.3, 0.81, 0.81, 0.28, 0.77, 0.81, 0.3, 0.3, 0.81, 0.81, 0.5, 0.81, 0.48, 0.81, 0.3, 0.3, 0.3, 0.13, 0.81, 0.81, 0.34, 0.3, 0.3, 0.81, 0.24, 0.38, 0.81, 0.35, 0.81, 0.81, 0.35, 0.63, 0.86, 0.63, 0.3, 0.18];
+    if (prices.length === 0) return;
+    const bins = {};
+    for (let p of prices) {
+      const b = (Math.floor(p * 10) / 10).toFixed(1);
+      bins[b] = (bins[b] || 0) + 1;
+    }
+    const labels = Object.keys(bins).sort();
+    new Chart(document.getElementById('priceChart'), {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Trades',
+          data: labels.map(l => bins[l]),
+          backgroundColor: '#a78bfa',
+          borderRadius: 3,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { display: false }, title: { display: true, text: 'Entry Price' } },
+          y: { grid: { color: gridColor } }
+        }
+      }
+    });
+  })();
+
+  // 4. Wallet Scores
+  (() => {
+    const wallets = [{"name": "knedloveprov", "score": 0.5137}, {"name": "Suertudo1", "score": 0.4044}, {"name": "anoin123", "score": 0.3498}, {"name": "bcda", "score": 0.0}, {"name": "Tiger200", "score": 0.0}, {"name": "texaskid", "score": 0.0}, {"name": "Talvez10", "score": 0.0}, {"name": "CarlosMC", "score": 0.0}, {"name": "Jdhdhduu", "score": 0.0}, {"name": "Mentallyillg", "score": 0.0}];
+    new Chart(document.getElementById('scoreChart'), {
+      type: 'bar',
+      data: {
+        labels: wallets.map(w => w.name),
+        datasets: [{
+          label: 'Score',
+          data: wallets.map(w => w.score),
+          backgroundColor: wallets.map(w => w.score > 0.3 ? '#34d399' : w.score > 0.1 ? '#fbbf24' : '#f87171'),
+          borderRadius: 3,
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { color: gridColor }, max: 1 },
+          y: { grid: { display: false } }
+        }
+      }
+    });
+  })();
+</script>
+
 </body>
 </html>
