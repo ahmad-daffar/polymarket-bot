@@ -1,0 +1,75 @@
+name: Polymarket Bot
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'   # Every 2 hours
+  workflow_dispatch:          # Also lets you trigger it manually from GitHub UI
+
+permissions:
+  contents: write             # Needed to commit the DB and dashboard back to repo
+  pages: write
+  id-token: write
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # ── 1. Check out the repo ────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── 2. Set up Python ─────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # ── 3. Restore DB from previous run ──────────────────────────
+      - name: Restore database
+        uses: actions/cache@v4
+        with:
+          path: polymarket_bot.db
+          key: polymarket-db-${{ github.run_number }}
+          restore-keys: |
+            polymarket-db-
+
+      # ── 4. Run the bot ───────────────────────────────────────────
+      - name: Run research + simulation
+        env:
+          POLYBOT_DB: ${{ github.workspace }}/polymarket_bot.db
+        run: |
+          python main.py --quick --simulate --skip-dashboard
+        continue-on-error: true   # Don't fail the whole workflow if API is flaky
+
+      # ── 5. Generate the dashboard ─────────────────────────────────
+      - name: Generate dashboard
+        env:
+          POLYBOT_DB: ${{ github.workspace }}/polymarket_bot.db
+        run: |
+          python dashboard.py --no-open --output docs/index.html
+        continue-on-error: true
+
+      # ── 6. Commit updated dashboard to docs/ ─────────────────────
+      - name: Commit dashboard
+        run: |
+          git config user.name  "polymarket-bot[bot]"
+          git config user.email "bot@polymarket-bot"
+          git add docs/index.html || true
+          git diff --cached --quiet || git commit -m "📊 Dashboard update $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git push || true
+
+      # ── 7. Save DB to cache for next run ─────────────────────────
+      - name: Save database to cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: polymarket_bot.db
+          key: polymarket-db-${{ github.run_number }}
