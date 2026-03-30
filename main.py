@@ -162,7 +162,14 @@ def run_forward_simulation(storage: Storage, notifier: Notifier, patterns: dict 
         return
 
     now_ts = int(time.time())
-    cutoff = now_ts - config.NEW_TRADE_WINDOW_SECS  # default ~2h window
+
+    # Determine the absolute floor for "new trade" cutoff.
+    # Use forward_start_date so we never miss trades since the bot first started.
+    fsd_str = storage.get_state("forward_start_date") or ""
+    try:
+        fsd_ts = int(datetime.fromisoformat(fsd_str.replace("Z", "+00:00")).timestamp())
+    except Exception:
+        fsd_ts = now_ts - 86400  # fallback: 24h
 
     total_executed = 0
     for _, wallet in top_wallets.iterrows():
@@ -170,8 +177,10 @@ def run_forward_simulation(storage: Storage, notifier: Notifier, patterns: dict 
         username = wallet.get("username", "anon")
         score    = wallet.get("score", 0)
 
-        last_ts  = storage.get_wallet_last_ts(addr)
-        since_ts = max(last_ts, cutoff)   # take whichever is more recent
+        last_ts = storage.get_wallet_last_ts(addr)
+        # If we've never seen this wallet before: go back to bot start date.
+        # If we have: only look at trades since last time we checked (avoids double-counting).
+        since_ts = last_ts if last_ts > 0 else fsd_ts
 
         since_str = datetime.fromtimestamp(since_ts, tz=timezone.utc).strftime("%H:%M UTC")
         print(f"\n  ── {username} (score={score:.3f}) ── since {since_str}")

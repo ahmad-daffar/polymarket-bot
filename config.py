@@ -13,7 +13,7 @@ BETA = 0.30    # Consistency weight (win‐rate stability)
 GAMMA = 0.20   # Max drawdown penalty
 
 # ─── Wallet Filters (strict) ────────────────────────────────────────────────
-MIN_RESOLVED_TRADES = 80
+MIN_RESOLVED_TRADES = 20
 MIN_AVG_ENTRY_PRICE = 0.20
 MAX_AVG_ENTRY_PRICE = 0.70
 MAX_INACTIVE_DAYS = 14

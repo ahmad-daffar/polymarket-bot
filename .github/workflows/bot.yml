@@ -50,7 +50,6 @@ jobs:
           INITIAL_BANKROLL: ${{ secrets.INITIAL_BANKROLL || '10000' }}
         run: |
           python main.py --quick --simulate --skip-dashboard
-        continue-on-error: true   # Don't fail the whole workflow if API is flaky
 
       # ── 5. Generate the dashboard ─────────────────────────────────
       - name: Generate dashboard
@@ -59,7 +58,7 @@ jobs:
           INITIAL_BANKROLL: ${{ secrets.INITIAL_BANKROLL || '10000' }}
         run: |
           python dashboard.py --no-open --output docs/index.html
-        continue-on-error: true
+        continue-on-error: true   # Dashboard failure shouldn't block the DB save
 
       # ── 6. Commit updated dashboard to docs/ ─────────────────────
       - name: Commit dashboard
