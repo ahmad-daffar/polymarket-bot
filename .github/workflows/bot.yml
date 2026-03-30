@@ -33,18 +33,21 @@ jobs:
         run: pip install -r requirements.txt
 
       # ── 3. Restore DB from previous run ──────────────────────────
+      # Cache key uses v2 prefix — forces a clean DB after the forward-only rewrite.
+      # Old backtest data from the v1 cache will never be restored.
       - name: Restore database
         uses: actions/cache@v4
         with:
           path: polymarket_bot.db
-          key: polymarket-db-${{ github.run_number }}
+          key: polymarket-db-v2-${{ github.run_number }}
           restore-keys: |
-            polymarket-db-
+            polymarket-db-v2-
 
       # ── 4. Run the bot ───────────────────────────────────────────
       - name: Run research + simulation
         env:
           POLYBOT_DB: ${{ github.workspace }}/polymarket_bot.db
+          INITIAL_BANKROLL: ${{ secrets.INITIAL_BANKROLL || '10000' }}
         run: |
           python main.py --quick --simulate --skip-dashboard
         continue-on-error: true   # Don't fail the whole workflow if API is flaky
@@ -53,6 +56,7 @@ jobs:
       - name: Generate dashboard
         env:
           POLYBOT_DB: ${{ github.workspace }}/polymarket_bot.db
+          INITIAL_BANKROLL: ${{ secrets.INITIAL_BANKROLL || '10000' }}
         run: |
           python dashboard.py --no-open --output docs/index.html
         continue-on-error: true
@@ -72,4 +76,4 @@ jobs:
         if: always()
         with:
           path: polymarket_bot.db
-          key: polymarket-db-${{ github.run_number }}
+          key: polymarket-db-v2-${{ github.run_number }}
