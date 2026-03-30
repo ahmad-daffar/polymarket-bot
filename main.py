@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config
-from data.fetcher import fetch_leaderboard, fetch_active_markets
+from data.fetcher import fetch_leaderboard, fetch_active_markets, fetch_wallet_activity
 from data.storage import Storage
 from data.wallet_scorer import score_wallets
 from data.demo_data import generate_leaderboard, generate_wallet_trades, generate_active_markets
@@ -123,64 +123,147 @@ def run_research(storage: Storage, notifier: Notifier, quick: bool = False):
     return scored, patterns, matched_markets
 
 
-def run_simulation(storage: Storage, notifier: Notifier, patterns: dict = None):
-    """Run the paper trading simulation engine."""
-
+def run_forward_simulation(storage: Storage, notifier: Notifier, patterns: dict = None):
+    """
+    Forward-only paper trading cycle. Each 2-hour call:
+      1. Resolves any open positions that settled (price ≥ 0.98 or ≤ 0.02).
+      2. For each top wallet, fetches ONLY trades newer than last_trade_ts.
+      3. Calls run_forward_cycle — no historical backtest, ever.
+    """
     print(f"\n{'='*60}")
-    print(f"  PAPER TRADING SIMULATION")
+    print(f"  FORWARD PAPER TRADING CYCLE")
     print(f"{'='*60}")
-    print(f"  Bankroll: ${config.STARTING_BANKROLL:,.2f}")
-    print(f"  Kelly fraction: {config.KELLY_FRACTION} (quarter-Kelly)")
-    print(f"  Max position: {config.MAX_POSITION_PCT:.0%} of bankroll")
+
+    trader = PaperTrader(storage)
+    perf   = PerformanceTracker(storage)
+
+    # Record forward start date on the very first run
+    if not storage.get_state("forward_start_date"):
+        now_iso = datetime.now(timezone.utc).isoformat()
+        storage.set_state("forward_start_date", now_iso)
+        print(f"  🏁 First run! Forward simulation started at {now_iso[:16]} UTC")
+
+    print(f"  Capital: ${trader.bankroll:,.2f}  |  Open positions: {len(trader.positions)}")
+    print(f"  Kelly fraction: {config.KELLY_FRACTION}  |  "
+          f"Max position: {config.MAX_POSITION_PCT:.0%}  |  "
+          f"Warm-up trades needed: {config.MIN_FORWARD_TRADES}")
+    print()
+
+    # ─── Step 1: Resolve settled positions ─────────────────────────────────
+    print(f"  Checking open positions for resolution …")
+    resolved = trader.check_and_resolve_open_positions(verbose=True)
+    if not resolved:
+        print(f"    (no positions resolved this cycle)")
+
+    # ─── Step 2: Mirror new wallet trades ──────────────────────────────────
+    top_wallets = storage.get_top_wallets(limit=config.TOP_WALLETS_TO_ANALYZE)
+    if top_wallets.empty:
+        print("  ✗ No qualifying wallets to mirror. Run research pipeline first.")
+        return
+
+    now_ts = int(time.time())
+    cutoff = now_ts - config.NEW_TRADE_WINDOW_SECS  # default ~2h window
+
+    total_executed = 0
+    for _, wallet in top_wallets.iterrows():
+        addr     = wallet["address"]
+        username = wallet.get("username", "anon")
+        score    = wallet.get("score", 0)
+
+        last_ts  = storage.get_wallet_last_ts(addr)
+        since_ts = max(last_ts, cutoff)   # take whichever is more recent
+
+        since_str = datetime.fromtimestamp(since_ts, tz=timezone.utc).strftime("%H:%M UTC")
+        print(f"\n  ── {username} (score={score:.3f}) ── since {since_str}")
+
+        raw_trades = fetch_wallet_activity(addr)
+        if raw_trades.empty:
+            print(f"     No activity returned from API.")
+            continue
+
+        # Filter to only trades newer than since_ts
+        if "timestamp" in raw_trades.columns:
+            raw_trades["_ts_unix"] = (
+                pd.to_datetime(raw_trades["timestamp"], utc=True, errors="coerce")
+                .astype("int64") // 1_000_000_000
+            )
+            new_df = raw_trades[raw_trades["_ts_unix"] > since_ts]
+            new_trades = new_df.to_dict("records")
+        else:
+            new_trades = []
+
+        print(f"     {len(new_trades)} new trade(s) in window")
+
+        if new_trades:
+            executed = trader.run_forward_cycle(addr, new_trades, patterns, verbose=True)
+            total_executed += len(executed)
+
+            for trade in executed:
+                notifier.alert_sim_trade(trade, trader.bankroll)
+
+            # Advance the wallet's last-seen timestamp
+            newest_ts = max(t.get("_ts_unix", since_ts) for t in new_trades)
+            storage.update_wallet_state(addr, last_trade_ts=int(newest_ts))
+
+        # Drawdown warning
+        portfolio = trader.get_portfolio_summary()
+        if portfolio["peak_bankroll"] > 0:
+            dd = 1 - (portfolio["bankroll"] / portfolio["peak_bankroll"])
+            if dd > 0.15:
+                notifier.alert_performance_milestone("drawdown", dd, 0.15)
+
+    # ─── Performance Report ─────────────────────────────────────────────────
+    print(f"\n  Trades executed this cycle: {total_executed}")
+    metrics = perf.compute_metrics(verbose=True)
+    return metrics
+
+
+def run_demo_simulation(storage: Storage, notifier: Notifier, patterns: dict = None):
+    """Demo mode: feed all cached synthetic trades through the forward cycle (no API)."""
+    print(f"\n{'='*60}")
+    print(f"  DEMO PAPER TRADING SIMULATION")
+    print(f"{'='*60}")
+    print(f"  Bankroll: ${config.STARTING_BANKROLL:,.2f}  |  "
+          f"Kelly: {config.KELLY_FRACTION}  |  Max pos: {config.MAX_POSITION_PCT:.0%}")
     print()
 
     trader = PaperTrader(storage)
-    perf = PerformanceTracker(storage)
+    perf   = PerformanceTracker(storage)
 
-    # Get top wallets to copy
     top_wallets = storage.get_top_wallets(limit=config.TOP_WALLETS_TO_ANALYZE)
-
     if top_wallets.empty:
         print("  ✗ No qualifying wallets to simulate from.")
-        print("    Run research pipeline first.")
         return
 
-    print(f"  Simulating trades from {len(top_wallets)} top wallets …\n")
+    print(f"  Simulating {len(top_wallets)} wallets with synthetic trades …\n")
 
     total_executed = 0
-    for i, wallet in top_wallets.iterrows():
-        addr = wallet["address"]
+    for _, wallet in top_wallets.iterrows():
+        addr     = wallet["address"]
         username = wallet.get("username", "anon")
-        score = wallet.get("score", 0)
+        score    = wallet.get("score", 0)
 
-        print(f"\n  ── Wallet {i+1}: {username} (score={score:.3f}) ──")
-
-        # Get their trades from storage
+        print(f"  ── {username} (score={score:.3f}) ──")
         trades = storage.get_wallet_trades(addr)
         if trades.empty:
             print(f"     No cached trades. Skipping.")
             continue
 
-        # Simulate copying their trades
-        executed = trader.simulate_from_wallet_history(
-            addr, trades, patterns, verbose=True
-        )
+        new_trades = trades.to_dict("records")
+        executed   = trader.run_forward_cycle(addr, new_trades, patterns, verbose=True)
         total_executed += len(executed)
 
-        # Notify on each sim trade
         for trade in executed:
             notifier.alert_sim_trade(trade, trader.bankroll)
 
-        # Check for drawdown warnings
         portfolio = trader.get_portfolio_summary()
-        dd = 1 - (portfolio["bankroll"] / portfolio["peak_bankroll"])
-        if dd > 0.15:
-            notifier.alert_performance_milestone("drawdown", dd, 0.15)
+        if portfolio["peak_bankroll"] > 0:
+            dd = 1 - (portfolio["bankroll"] / portfolio["peak_bankroll"])
+            if dd > 0.15:
+                notifier.alert_performance_milestone("drawdown", dd, 0.15)
 
-    # ─── Performance Report ─────────────────────────────────────────
     print(f"\n  Total simulated trades: {total_executed}")
     metrics = perf.compute_metrics(verbose=True)
-
     return metrics
 
 
@@ -268,7 +351,7 @@ def run_demo(storage: Storage, notifier: Notifier, simulate: bool = False):
 
     # ─── Step 5: Simulation ─────────────────────────────────────────
     if simulate:
-        run_simulation(storage, notifier, patterns)
+        run_demo_simulation(storage, notifier, patterns)
 
     return scored, patterns, matched
 
@@ -327,11 +410,11 @@ def main():
     elif not args.skip_research:
         scored, patterns, matched = run_research(storage, notifier, quick=args.quick)
         if args.simulate:
-            run_simulation(storage, notifier, patterns)
+            run_forward_simulation(storage, notifier, patterns)
     else:
         print("\n  Skipping research, using cached data …")
         if args.simulate:
-            run_simulation(storage, notifier, patterns)
+            run_forward_simulation(storage, notifier, patterns)
 
     # ─── Final Summary ──────────────────────────────────────────────
     elapsed = time.time() - start_time

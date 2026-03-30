@@ -49,6 +49,22 @@ def generate_dashboard(db_path=None, output_path=None, open_browser=True):
     sim_trades = _query(db_path, "SELECT * FROM simulated_trades ORDER BY timestamp ASC")
     patterns = _query(db_path, "SELECT * FROM patterns")
 
+    # Forward simulation metadata
+    bot_state = {row["key"]: row["value"] for row in _query(db_path,
+        "SELECT key, value FROM bot_state") if "key" in row}
+    forward_start_date = bot_state.get("forward_start_date", "")
+    if forward_start_date:
+        try:
+            fsd = datetime.fromisoformat(forward_start_date.replace("Z", "+00:00"))
+            days_running = max(0, (datetime.now(timezone.utc) - fsd).days)
+            forward_start_label = fsd.strftime("%Y-%m-%d %H:%M UTC")
+        except Exception:
+            days_running = 0
+            forward_start_label = forward_start_date[:16]
+    else:
+        days_running = 0
+        forward_start_label = "Not started yet"
+
     passing_wallets = [w for w in wallets if w.get("passes_filters")]
     failing_wallets = [w for w in wallets if not w.get("passes_filters")]
 
@@ -60,16 +76,16 @@ def generate_dashboard(db_path=None, output_path=None, open_browser=True):
     total_fees = sum(t.get("fees_paid", 0) or 0 for t in sim_trades)
     win_rate = len(wins) / len(resolved_trades) * 100 if resolved_trades else 0
 
-    # Equity curve
+    # Equity curve (forward-only: starts at INITIAL_BANKROLL, never replays history)
     equity_curve = []
-    running = config.STARTING_BANKROLL
+    running = config.INITIAL_BANKROLL
     for t in sim_trades:
-        if t.get("resolved") and t.get("pnl") is not None:
-            running += t["pnl"]
+        if t.get("bankroll_after") is not None:
+            running = float(t["bankroll_after"])
         equity_curve.append({"x": len(equity_curve), "y": round(running, 2)})
 
     # Max drawdown
-    peak = config.STARTING_BANKROLL
+    peak = config.INITIAL_BANKROLL
     max_dd = 0
     for pt in equity_curve:
         if pt["y"] > peak:
@@ -107,8 +123,8 @@ def generate_dashboard(db_path=None, output_path=None, open_browser=True):
             pass
 
     # ─── Build HTML ────────────────────────────────────────────────
-    final_bankroll = equity_curve[-1]["y"] if equity_curve else config.STARTING_BANKROLL
-    total_return_pct = ((final_bankroll - config.STARTING_BANKROLL) / config.STARTING_BANKROLL) * 100
+    final_bankroll = equity_curve[-1]["y"] if equity_curve else config.INITIAL_BANKROLL
+    total_return_pct = ((final_bankroll - config.INITIAL_BANKROLL) / config.INITIAL_BANKROLL) * 100
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -285,16 +301,32 @@ def generate_dashboard(db_path=None, output_path=None, open_browser=True):
 
 <div class="container">
 
+  <!-- Forward-only mode banner -->
+  <div style="background:#0f1a2e;border:1px solid #1e3a5f;border-radius:8px;padding:12px 20px;margin-bottom:20px;display:flex;align-items:center;gap:12px;">
+    <span style="font-size:18px">🏁</span>
+    <div>
+      <span style="color:#60a5fa;font-weight:600;font-size:13px">FORWARD-ONLY MODE</span>
+      <span style="color:#475569;font-size:12px;margin-left:12px">No backtesting — only real forward trades counted</span>
+      <span style="color:#475569;font-size:12px;margin-left:12px">Started: {forward_start_label}</span>
+    </div>
+  </div>
+
   <!-- KPI Row -->
   <div class="kpi-row">
     <div class="kpi">
-      <div class="label">Starting Bankroll</div>
-      <div class="value blue">${config.STARTING_BANKROLL:,.0f}</div>
+      <div class="label">Starting Capital</div>
+      <div class="value blue">${config.INITIAL_BANKROLL:,.0f}</div>
+      <div class="sub">configurable via env</div>
     </div>
     <div class="kpi">
-      <div class="label">Final Bankroll</div>
+      <div class="label">Current Capital</div>
       <div class="value {"green" if total_return_pct >= 0 else "red"}">${final_bankroll:,.2f}</div>
-      <div class="sub">{"+" if total_return_pct >= 0 else ""}{total_return_pct:.1f}%</div>
+      <div class="sub">{"+" if total_return_pct >= 0 else ""}{total_return_pct:.1f}% return</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Days Running</div>
+      <div class="value purple">{days_running}</div>
+      <div class="sub">forward trades: {len(sim_trades)}</div>
     </div>
     <div class="kpi">
       <div class="label">Win Rate</div>
@@ -306,14 +338,14 @@ def generate_dashboard(db_path=None, output_path=None, open_browser=True):
       <div class="value {"red" if max_dd > 0.2 else "yellow"}">{max_dd:.1%}</div>
     </div>
     <div class="kpi">
-      <div class="label">Wallets Passing</div>
+      <div class="label">Wallets Tracked</div>
       <div class="value purple">{len(passing_wallets)}</div>
       <div class="sub">of {len(wallets)} scored</div>
     </div>
     <div class="kpi">
       <div class="label">Total P&amp;L</div>
       <div class="value {"green" if total_pnl >= 0 else "red"}">${total_pnl:+,.2f}</div>
-      <div class="sub">fees: ${total_fees:.2f}</div>
+      <div class="sub">fees paid: ${total_fees:.2f}</div>
     </div>
   </div>
 

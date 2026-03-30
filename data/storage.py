@@ -107,6 +107,26 @@ class Storage:
             )
         """)
 
+        # ── Forward-simulation state ─────────────────────────────────────────
+        # wallet_state: tracks the last trade timestamp we've seen per wallet
+        # and how many forward trades we've observed (for warm-up guardrail).
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS wallet_state (
+                wallet_address TEXT PRIMARY KEY,
+                last_trade_ts  INTEGER DEFAULT 0,
+                forward_trades INTEGER DEFAULT 0,
+                updated_at     TEXT
+            )
+        """)
+
+        # bot_state: single-row key/value store for global bot metadata.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS bot_state (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+
         self.conn.commit()
 
     # ─── Wallets ────────────────────────────────────────────────────────
@@ -303,6 +323,53 @@ class Storage:
                 lambda x: json.loads(x) if isinstance(x, str) else x
             )
         return df
+
+    # ─── Bot State (key/value) ───────────────────────────────────────────
+
+    def get_state(self, key: str, default=None):
+        c = self.conn.cursor()
+        row = c.execute("SELECT value FROM bot_state WHERE key=?", (key,)).fetchone()
+        return row[0] if row else default
+
+    def set_state(self, key: str, value):
+        c = self.conn.cursor()
+        c.execute("INSERT OR REPLACE INTO bot_state (key, value) VALUES (?,?)",
+                  (key, str(value)))
+        self.conn.commit()
+
+    # ─── Wallet Forward State ────────────────────────────────────────────
+
+    def get_wallet_last_ts(self, wallet_address: str) -> int:
+        """Return the last trade timestamp (unix seconds) seen for this wallet."""
+        c = self.conn.cursor()
+        row = c.execute(
+            "SELECT last_trade_ts FROM wallet_state WHERE wallet_address=?",
+            (wallet_address,)
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+    def update_wallet_state(self, wallet_address: str,
+                             last_trade_ts: int, forward_trades_delta: int = 0):
+        """Upsert the wallet's forward state."""
+        now = datetime.now(timezone.utc).isoformat()
+        c = self.conn.cursor()
+        c.execute("""
+            INSERT INTO wallet_state (wallet_address, last_trade_ts, forward_trades, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(wallet_address) DO UPDATE SET
+                last_trade_ts  = MAX(last_trade_ts, excluded.last_trade_ts),
+                forward_trades = forward_trades + ?,
+                updated_at     = excluded.updated_at
+        """, (wallet_address, last_trade_ts, 0, now, forward_trades_delta))
+        self.conn.commit()
+
+    def get_wallet_forward_trades(self, wallet_address: str) -> int:
+        c = self.conn.cursor()
+        row = c.execute(
+            "SELECT forward_trades FROM wallet_state WHERE wallet_address=?",
+            (wallet_address,)
+        ).fetchone()
+        return int(row[0]) if row else 0
 
     # ─── Utilities ──────────────────────────────────────────────────────
 

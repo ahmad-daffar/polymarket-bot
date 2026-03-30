@@ -24,10 +24,27 @@ MIN_HISTORY_MONTHS = 0
 MAX_SINGLE_TRADE_PNL_PCT = 0.30   # No single trade > 30% of total PnL
 
 # ─── Simulation ─────────────────────────────────────────────────────────────
-STARTING_BANKROLL = 500.0
+# Starting capital — this is the only number you need to change to control size.
+# Set via env var INITIAL_BANKROLL or edit here.
+import os as _os2
+INITIAL_BANKROLL = float(_os2.environ.get("INITIAL_BANKROLL", "10000"))
+
+STARTING_BANKROLL = INITIAL_BANKROLL   # alias kept for legacy references
 KELLY_FRACTION = 0.25              # Quarter-Kelly for safety
 MAX_POSITION_PCT = 0.10            # Max 10% of bankroll per trade
 MIN_EDGE = 0.02                    # Minimum edge to take a trade
+
+# ─── Forward-Only Paper Trading ──────────────────────────────────────────────
+# The bot ONLY mirrors trades that happen AFTER it first ran. No backtest numbers.
+# MIN_FORWARD_TRADES: we need to observe this many trades from a wallet in the
+# FORWARD period before trusting its edge enough for full Kelly sizing.
+# Until then we use MICRO_BET_PCT of bankroll (tiny probe bets).
+MIN_FORWARD_TRADES = 5             # Trades needed before full Kelly kicks in
+MICRO_BET_PCT = 0.005              # 0.5% bankroll per trade while warming up
+
+# How old a trade can be (in seconds) to be considered "new" on this run.
+# 2-hour runs → 7500s window (with buffer for latency).
+NEW_TRADE_WINDOW_SECS = 7500
 
 # ─── Transaction Fees (Polymarket CLOB) ─────────────────────────────────────
 # Taker fee: 2% of notional on entry. No fee on losing trades (you just lose stake).
