@@ -127,8 +127,18 @@ def run_forward_simulation(storage: Storage, notifier: Notifier, patterns: dict 
     """
     Forward-only paper trading cycle. Each 2-hour call:
       1. Resolves any open positions that settled (price ≥ 0.98 or ≤ 0.02).
-      2. For each top wallet, fetches ONLY trades newer than last_trade_ts.
-      3. Calls run_forward_cycle — no historical backtest, ever.
+      2. For each top wallet, fetches all recent activity.
+      3. Calls run_forward_cycle — PaperTrader.traded_ids (condition_id dedup)
+         prevents re-entry across runs, making the cycle idempotent.
+
+    WHY NO TIMESTAMP FILTERING:
+      The Polymarket activity API often returns null/zero timestamps, causing
+      pd.NaT → int64 sentinel (-9.2e18) which is always < since_ts, silently
+      dropping every trade. Instead we rely on condition_id dedup:
+        • First run  : enters all qualifying trades with micro-bets (warm-up).
+        • Subsequent : all prior condition_ids are in traded_ids → skipped.
+          Only genuinely new market entries (new condition_ids) get executed.
+      This is de-facto forward-only after the first cycle.
     """
     print(f"\n{'='*60}")
     print(f"  FORWARD PAPER TRADING CYCLE")
@@ -169,45 +179,29 @@ def run_forward_simulation(storage: Storage, notifier: Notifier, patterns: dict 
         username = wallet.get("username", "anon")
         score    = wallet.get("score", 0)
 
-        last_ts = storage.get_wallet_last_ts(addr)
-        if last_ts > 0:
-            # Normal case: only look at trades since last time we checked this wallet
-            since_ts = last_ts
-        else:
-            # First time seeing this wallet: look back 24h to catch recent activity
-            since_ts = now_ts - 86400
-
-        since_str = datetime.fromtimestamp(since_ts, tz=timezone.utc).strftime("%H:%M UTC")
-        print(f"\n  ── {username} (score={score:.3f}) ── since {since_str}")
+        last_ts  = storage.get_wallet_last_ts(addr)
+        tag      = "(first time)" if last_ts == 0 else "(seen before)"
+        print(f"\n  ── {username} (score={score:.3f}) {tag}")
 
         raw_trades = fetch_wallet_activity(addr)
         if raw_trades.empty:
             print(f"     No activity returned from API.")
             continue
 
-        # Filter to only trades newer than since_ts
-        if "timestamp" in raw_trades.columns:
-            raw_trades["_ts_unix"] = (
-                pd.to_datetime(raw_trades["timestamp"], utc=True, errors="coerce")
-                .astype("int64") // 1_000_000_000
-            )
-            new_df = raw_trades[raw_trades["_ts_unix"] > since_ts]
-            new_trades = new_df.to_dict("records")
-        else:
-            new_trades = []
+        # Hand ALL fetched trades to run_forward_cycle.
+        # PaperTrader skips any condition_id already in self.traded_ids, so
+        # re-fetching the same trades on subsequent runs is safe and idempotent.
+        all_trades = raw_trades.to_dict("records")
+        print(f"     {len(all_trades)} trade(s) fetched — checking for new condition_ids …")
 
-        print(f"     {len(new_trades)} new trade(s) in window")
+        executed = trader.run_forward_cycle(addr, all_trades, patterns, verbose=True)
+        total_executed += len(executed)
 
-        if new_trades:
-            executed = trader.run_forward_cycle(addr, new_trades, patterns, verbose=True)
-            total_executed += len(executed)
+        for trade in executed:
+            notifier.alert_sim_trade(trade, trader.bankroll)
 
-            for trade in executed:
-                notifier.alert_sim_trade(trade, trader.bankroll)
-
-            # Advance the wallet's last-seen timestamp
-            newest_ts = max(t.get("_ts_unix", since_ts) for t in new_trades)
-            storage.update_wallet_state(addr, last_trade_ts=int(newest_ts))
+        # Mark wallet as seen so future logs can distinguish first vs repeat runs
+        storage.update_wallet_state(addr, last_trade_ts=now_ts)
 
         # Drawdown warning
         portfolio = trader.get_portfolio_summary()
