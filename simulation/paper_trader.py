@@ -55,6 +55,10 @@ class PaperTrader:
             if cid:
                 self.traded_ids.add(cid)
 
+        # Also load seeded condition_ids (seen on first wallet observation, not traded)
+        seeded = self.storage.get_known_condition_ids()
+        self.traded_ids.update(seeded)
+
         # Restore open positions
         open_trades = sim_trades[sim_trades["resolved"] == 0]
         for _, t in open_trades.iterrows():

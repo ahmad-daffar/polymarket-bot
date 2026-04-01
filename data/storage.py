@@ -127,6 +127,16 @@ class Storage:
             )
         """)
 
+        # known_condition_ids: condition_ids we've SEEN but chose not to trade
+        # (seeded on first wallet observation). Prevents re-entry on later runs.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS known_condition_ids (
+                condition_id TEXT PRIMARY KEY,
+                wallet_address TEXT,
+                seeded_at TEXT
+            )
+        """)
+
         self.conn.commit()
 
     # ─── Wallets ────────────────────────────────────────────────────────
@@ -370,6 +380,24 @@ class Storage:
             (wallet_address,)
         ).fetchone()
         return int(row[0]) if row else 0
+
+    # ─── Known (Seeded) Condition IDs ──────────────────────────────────
+
+    def seed_condition_ids(self, condition_ids: list, wallet_address: str):
+        """Bulk-insert condition_ids we've seen but chose not to trade."""
+        now = datetime.now(timezone.utc).isoformat()
+        c = self.conn.cursor()
+        c.executemany("""
+            INSERT OR IGNORE INTO known_condition_ids
+            (condition_id, wallet_address, seeded_at) VALUES (?, ?, ?)
+        """, [(cid, wallet_address, now) for cid in condition_ids])
+        self.conn.commit()
+
+    def get_known_condition_ids(self) -> set:
+        """Return all condition_ids that were seeded (not traded)."""
+        c = self.conn.cursor()
+        rows = c.execute("SELECT condition_id FROM known_condition_ids").fetchall()
+        return {row[0] for row in rows}
 
     # ─── Utilities ──────────────────────────────────────────────────────
 

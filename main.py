@@ -147,6 +147,20 @@ def run_forward_simulation(storage: Storage, notifier: Notifier, patterns: dict 
     trader = PaperTrader(storage)
     perf   = PerformanceTracker(storage)
 
+    # ─── Corruption guard: wipe bad data from pre-seed-fix runs ────────
+    if trader.bankroll < 0:
+        print(f"  ⚠ Corrupted state detected (bankroll=${trader.bankroll:,.2f})")
+        print(f"    Wiping simulated_trades and known_condition_ids to start fresh …")
+        c = storage.conn.cursor()
+        c.execute("DELETE FROM simulated_trades")
+        c.execute("DELETE FROM known_condition_ids")
+        c.execute("DELETE FROM wallet_state")
+        storage.conn.commit()
+        # Re-init trader with clean state
+        trader = PaperTrader(storage)
+        storage.set_state("forward_start_date", None)
+        print(f"    ✓ Reset complete. Bankroll: ${trader.bankroll:,.2f}")
+
     # Record forward start date on the very first run
     if not storage.get_state("forward_start_date"):
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -188,11 +202,37 @@ def run_forward_simulation(storage: Storage, notifier: Notifier, patterns: dict 
             print(f"     No activity returned from API.")
             continue
 
-        # Hand ALL fetched trades to run_forward_cycle.
-        # PaperTrader skips any condition_id already in self.traded_ids, so
-        # re-fetching the same trades on subsequent runs is safe and idempotent.
         all_trades = raw_trades.to_dict("records")
-        print(f"     {len(all_trades)} trade(s) fetched — checking for new condition_ids …")
+        print(f"     {len(all_trades)} trade(s) fetched")
+
+        # ── SEED vs TRADE logic ──────────────────────────────────────────
+        # FIRST TIME seeing this wallet → seed all existing condition_ids
+        # into traded_ids WITHOUT executing any trades.  This establishes
+        # the "known universe" so that only genuinely NEW trades (ones that
+        # appear on a later run) get mirrored.
+        if last_ts == 0:
+            new_cids = []
+            for t in all_trades:
+                cid = t.get("condition_id", "")
+                if cid and cid not in trader.traded_ids:
+                    trader.traded_ids.add(cid)
+                    new_cids.append(cid)
+            # Persist to DB so they survive across runs
+            if new_cids:
+                storage.seed_condition_ids(new_cids, addr)
+            print(f"     SEED RUN — registered {len(new_cids)} condition_ids (no trades executed)")
+            # Mark wallet as seen so next run will trade
+            storage.update_wallet_state(addr, last_trade_ts=now_ts)
+            continue
+
+        # SEEN BEFORE → only genuinely new condition_ids will pass the
+        # traded_ids check inside run_forward_cycle.
+        print(f"     Checking for new condition_ids …")
+
+        # Safety: don't trade if bankroll is exhausted
+        if trader.bankroll < 10:
+            print(f"     ⚠ Bankroll too low (${trader.bankroll:,.2f}), skipping.")
+            continue
 
         executed = trader.run_forward_cycle(addr, all_trades, patterns, verbose=True)
         total_executed += len(executed)
